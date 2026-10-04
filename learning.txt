@@ -1,0 +1,81 @@
+================================================================================
+BACKEND INTERVIEW PREPARATION NOTES - KEEPR PROJECT
+================================================================================
+
+1. ARCHITECTURE & CODE DESIGN
+--------------------------------------------------------------------------------
+Q: What is Layered Architecture in backend development and why use it?
+A: It separates concerns into distinct layers:
+   - Routes: Define HTTP endpoints and apply middleware.
+   - Controllers: Handle HTTP request/response, status codes, and input parsing.
+   - Services: Reusable business logic (e.g., JWT generation, mailing).
+   - Models: Direct database interactions and SQL queries.
+   - Middlewares: Cross-cutting concerns (authentication, rate-limiting, logging).
+   Benefit: Decoupled, testable, maintainable, and scalable code.
+
+2. DATABASE & CONNECTION POOLING (PostgreSQL / Supabase)
+--------------------------------------------------------------------------------
+Q: Why use a Connection Pool (`pg.Pool`) instead of single client connections?
+A: Creating a new TCP/TLS database connection per request is expensive and slow. A pool keeps a set of reusable connections alive, drastically improving throughput and preventing database connection exhaustion under load.
+
+Q: How do you handle schema evolution safely without breaking existing tables?
+A: Use idempotent DDL statements:
+   - `CREATE TABLE IF NOT EXISTS`
+   - `ALTER TABLE users ADD COLUMN IF NOT EXISTS column_name data_type`
+   - Wrap constraint creation inside conditional blocks (`pg_constraint` checks) to avoid duplicate constraint errors.
+
+Q: How does Node.js `pg` driver handle PostgreSQL `BIGINT` (INT8) values?
+A: PostgreSQL 64-bit integers exceed JavaScript's max safe integer (`Number.MAX_SAFE_INTEGER` = 2^53 - 1). The `pg` driver returns `BIGINT` as a String to prevent precision loss. It should be explicitly parsed with `Number()` or `parseInt()` when precision limits allow.
+
+3. AUTHENTICATION & PASSWORD SECURITY
+--------------------------------------------------------------------------------
+Q: Why use `bcrypt` over SHA-256 / MD5 for password storage?
+A: Fast hash algorithms (SHA/MD5) are vulnerable to GPU brute-force attacks. Bcrypt is deliberately slow (adaptive work factor / cost) and automatically includes a unique random salt to defeat Rainbow Table attacks.
+
+Q: Why must password comparisons use constant-time functions?
+A: Standard string comparisons (`===`) exit at the first mismatched character, leaking timing information that attackers can measure to guess passwords byte-by-byte (timing attack). `bcrypt.compare()` compares in constant time.
+
+4. JSON WEB TOKENS (JWT)
+--------------------------------------------------------------------------------
+Q: What are the 3 parts of a JWT and how does verification work?
+A: Header (algorithm), Payload (claims: id, email, exp), and Signature (`HMACSHA256(header + payload, secret)`). The server verifies the token by recomputing the signature with its private secret; if matched and unexpired, the token is valid without querying a session store (stateless).
+
+Q: What data should NEVER be put inside a JWT payload?
+A: Passwords, password hashes, secrets, or sensitive PII. JWT payloads are only Base64Url-encoded, not encrypted; anyone with the token can decode and read the claims.
+
+5. COOKIE SECURITY & TOKEN STORAGE
+--------------------------------------------------------------------------------
+Q: Why store JWTs in `HttpOnly` Cookies instead of `localStorage`?
+A: Tokens in `localStorage` can be stolen via Cross-Site Scripting (XSS) scripts (`document.cookie` / JS access). `HttpOnly` cookies cannot be accessed by client-side JavaScript, mitigating XSS token theft.
+
+Q: What are `SameSite` and `Secure` cookie attributes?
+A: - `HttpOnly`: Prevents JavaScript access (defends against XSS).
+   - `Secure`: Ensures cookies are only transmitted over HTTPS (production).
+   - `SameSite`: Controls cross-origin cookie sending (`Lax` / `Strict` defends against Cross-Site Request Forgery / CSRF).
+
+6. INPUT VALIDATION & SANITIZATION (Zod)
+--------------------------------------------------------------------------------
+Q: Why validate input using a schema library like Zod instead of manual checks?
+A: Zod provides type inference, centralized rules, strict parsing, automatic type narrowing, and detailed structured error responses, eliminating repetitive `if/else` checks and preventing unexpected payload injections.
+
+Q: Why sanitize user input (e.g., `trim()` and `toLowerCase()`)?
+A: Prevents duplicate account creation with trailing spaces (e.g., `"john@x.com "` vs `"john@x.com"`), ensures case-insensitive email matching, and avoids accidental whitespace errors while preserving strict password characters.
+
+7. DEFENSIVE SECURITY & USER ENUMERATION
+--------------------------------------------------------------------------------
+Q: What is User Enumeration and how do you prevent it on login?
+A: User enumeration occurs when an API reveals whether an email exists (e.g., "User not found" vs "Wrong password"). To prevent it, always return an identical generic 401 response: `"Invalid email or password."` for both nonexistent users and incorrect passwords.
+
+Q: How do you prevent sensitive fields from leaking in API responses?
+A: Use TypeScript utility types (e.g., `type SafeUser = Omit<User, "password_hash">`) and serializer helper functions (`toSafeUser()`) to delete or omit confidential fields before sending responses.
+
+8. RATE LIMITING & BRUTE-FORCE DEFENSE
+--------------------------------------------------------------------------------
+Q: How should a login rate limiter be configured to avoid blocking whole offices?
+A: Key the rate limit by a combination of client IP and target email (`${req.ip}_${email}`), rather than IP alone. Enable `skipSuccessfulRequests: true` so legitimate logins never trigger lockout thresholds.
+
+9. ROLE-BASED ACCESS CONTROL (RBAC) & PRIVILEGE ESCALATION
+--------------------------------------------------------------------------------
+Q: How do you prevent Mass Assignment / Privilege Escalation during user signup?
+A: Never bind incoming request bodies directly into database models. Enforce default roles (`'user'`) entirely on the backend, strip any user-supplied `role` input in validation schemas, and enforce database `CHECK (role IN ('user', 'admin'))` constraints.
+
